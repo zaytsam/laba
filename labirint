@@ -1,0 +1,210 @@
+import tkinter as tk
+import random
+
+GRID_SIZE = 21
+CELL_SIZE = 25
+MAZE_WIDTH = GRID_SIZE * CELL_SIZE
+INFO_WIDTH = 300
+HEIGHT = GRID_SIZE * CELL_SIZE
+
+
+class MazeTkinter:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Лабиринт")
+        self.root.resizable(False, False)
+
+        self.canvas = tk.Canvas(self.root, width=MAZE_WIDTH, height=HEIGHT, bg='white')
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+
+        self.info_frame = tk.Frame(self.root, width=INFO_WIDTH, height=HEIGHT, bg='#f0f0f0')
+        self.info_frame.grid(row=0, column=1, sticky='nsew')
+        self.info_frame.grid_propagate(False)
+
+        self.grid = [[1 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        self.start = (1, 1)
+        self.end = (GRID_SIZE - 2, GRID_SIZE - 2)
+        self.path = []
+        self.bot_position = None
+        self.bot_moving = False
+        self.bot_path_index = 0
+        self.path_length = 0
+
+        self.setup_info_panel()
+        self.generate_maze()
+        self.draw_maze()
+
+        self.canvas.bind('<Button-1>', self.on_click)
+        self.root.bind('<Return>', self.solve)
+        self.root.bind('<r>', self.reset)
+        self.root.bind('<R>', self.reset)
+
+    def setup_info_panel(self):
+        title = tk.Label(self.info_frame, text="Лабиринт", font=('Arial', 16, 'bold'),
+                         fg='darkblue', bg='#f0f0f0')
+        title.pack(pady=20, padx=20, anchor='w')
+
+        instructions = [
+            "Управление:",
+            "ЛКМ - поставить/убрать стену",
+            "Enter - найти путь и запустить бота",
+            "R - новый лабиринт",
+        ]
+
+        for text in instructions:
+            color = 'darkblue' if text == "Управление:" else 'black'
+            label = tk.Label(self.info_frame, text=text, font=('Arial', 10),
+                             fg=color, bg='#f0f0f0', anchor='w')
+            label.pack(pady=5, padx=20, anchor='w')
+
+        self.status_var = tk.StringVar(value="Готов к работе")
+        self.status_label = tk.Label(self.info_frame, textvariable=self.status_var,
+                                     font=('Arial', 10, 'bold'), fg='purple', bg='#f0f0f0')
+        self.status_label.pack(pady=20, padx=20, anchor='w')
+
+        self.path_length_var = tk.StringVar(value="Длина пути: 0")
+        self.path_length_label = tk.Label(self.info_frame, textvariable=self.path_length_var,
+                                          font=('Arial', 10), bg='#f0f0f0')
+        self.path_length_label.pack(pady=5, padx=20, anchor='w')
+
+    def generate_maze(self):
+        frontier = []
+        x, y = self.start
+        self.grid[x][y] = 0
+
+        for dx, dy in [(0, 2), (2, 0), (0, -2), (-2, 0)]:
+            nx, ny = x + dx, y + dy
+            if 0 < nx < GRID_SIZE - 1 and 0 < ny < GRID_SIZE - 1:
+                frontier.append((nx, ny, x, y))
+
+        while frontier:
+            x, y, px, py = frontier.pop(random.randint(0, len(frontier) - 1))
+            if self.grid[x][y] == 1:
+                self.grid[x][y] = 0
+                self.grid[(x + px) // 2][(y + py) // 2] = 0
+                for dx, dy in [(0, 2), (2, 0), (0, -2), (-2, 0)]:
+                    nx, ny = x + dx, y + dy
+                    if 0 < nx < GRID_SIZE - 1 and 0 < ny < GRID_SIZE - 1 and self.grid[nx][ny] == 1:
+                        frontier.append((nx, ny, x, y))
+
+        for _ in range(GRID_SIZE * 2):
+            x = random.randint(1, GRID_SIZE - 2)
+            y = random.randint(1, GRID_SIZE - 2)
+            if self.grid[x][y] == 1 and (x, y) != self.start and (x, y) != self.end:
+                passage_neighbors = 0
+                for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and self.grid[nx][ny] == 0:
+                        passage_neighbors += 1
+                if passage_neighbors >= 2:
+                    self.grid[x][y] = 0
+
+        self.grid[self.start[0]][self.start[1]] = 0
+        self.grid[self.end[0]][self.end[1]] = 0
+
+    def find_path(self):
+        queue = [(self.start, [])]
+        visited = set([self.start])
+        directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+
+        while queue:
+            (x, y), path = queue.pop(0)
+            if (x, y) == self.end:
+                return path + [(x, y)]
+            for dx, dy in directions:
+                nx, ny = x + dx, y + dy
+                if (0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and self.grid[nx][ny] == 0 and (nx, ny) not in visited):
+                    visited.add((nx, ny))
+                    queue.append(((nx, ny), path + [(x, y)]))
+        return []
+
+    def solve(self, event=None):
+        self.path = self.find_path()
+        self.path_length = len(self.path) - 1 if self.path else 0
+        self.path_length_var.set(f"Длина пути: {self.path_length}")
+
+        if self.path:
+            self.status_var.set("Путь найден!")
+            self.bot_position = list(self.start)
+            self.bot_path_index = 0
+            self.bot_moving = True
+            self.animate_bot()
+        else:
+            self.status_var.set("Путь не найден!")
+
+    def animate_bot(self):
+        if not self.bot_moving or not self.path or self.bot_path_index >= len(self.path) - 1:
+            self.bot_moving = False
+            return
+
+        self.bot_path_index += 1
+        self.bot_position = list(self.path[self.bot_path_index])
+        self.draw_maze()
+
+        if self.bot_moving:
+            self.root.after(100, self.animate_bot)  # 100ms задержка
+
+    def on_click(self, event):
+        x, y = event.x, event.y
+        grid_x = y // CELL_SIZE
+        grid_y = x // CELL_SIZE
+
+        if 0 <= grid_x < GRID_SIZE and 0 <= grid_y < GRID_SIZE:
+            if (grid_x, grid_y) != self.start and (grid_x, grid_y) != self.end:
+                self.grid[grid_x][grid_y] = 1 - self.grid[grid_x][grid_y]
+                self.bot_moving = False
+                self.path = []
+                self.path_length = 0
+                self.path_length_var.set(f"Длина пути: {self.path_length}")
+                self.draw_maze()
+
+    def reset(self, event=None):
+        self.grid = [[1 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        self.path = []
+        self.bot_moving = False
+        self.path_length = 0
+        self.path_length_var.set(f"Длина пути: {self.path_length}")
+        self.generate_maze()
+        self.draw_maze()
+
+    def draw_maze(self):
+        self.canvas.delete("all")
+
+        for i in range(GRID_SIZE):
+            for j in range(GRID_SIZE):
+                x1, y1 = j * CELL_SIZE, i * CELL_SIZE
+                x2, y2 = x1 + CELL_SIZE, y1 + CELL_SIZE
+
+                if self.grid[i][j] == 1:
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill='black', outline='gray')
+                else:
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='gray')
+
+        start_x1 = self.start[1] * CELL_SIZE
+        start_y1 = self.start[0] * CELL_SIZE
+        self.canvas.create_rectangle(start_x1, start_y1,
+                                     start_x1 + CELL_SIZE, start_y1 + CELL_SIZE,
+                                     fill='green', outline='gray')
+
+        end_x1 = self.end[1] * CELL_SIZE
+        end_y1 = self.end[0] * CELL_SIZE
+        self.canvas.create_rectangle(end_x1, end_y1,
+                                     end_x1 + CELL_SIZE, end_y1 + CELL_SIZE,
+                                     fill='red', outline='gray')
+
+        # Бот
+        if self.bot_position:
+            bot_x1 = self.bot_position[1] * CELL_SIZE + CELL_SIZE // 4
+            bot_y1 = self.bot_position[0] * CELL_SIZE + CELL_SIZE // 4
+            bot_size = CELL_SIZE // 1.5
+            self.canvas.create_oval(bot_x1, bot_y1,
+                                    bot_x1 + bot_size, bot_y1 + bot_size,
+                                    fill='blue')
+
+    def run(self):
+        self.root.mainloop()
+
+
+if __name__ == "__main__":
+    maze = MazeTkinter()
+    maze.run()
