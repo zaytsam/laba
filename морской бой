@@ -1,0 +1,353 @@
+import tkinter as tk
+from tkinter import messagebox
+import random
+
+class Battleship:
+    def __init__(self):
+        self.window = tk.Tk()
+        self.window.title("Морской бой")
+        self.window.resizable(False, False)
+        
+        self.board_size = 10
+        self.ships = [(1, 4), (2, 3), (3, 2), (4, 1)]
+        
+        self.player_board = [[0 for _ in range(self.board_size)] for _ in range(self.board_size)]
+        self.computer_board = [[0 for _ in range(self.board_size)] for _ in range(self.board_size)]
+        self.computer_ships = []
+        
+        self.player_ships_info = []
+        self.computer_ships_info = []
+        
+        self.game_started = False
+        self.player_turn = True
+        
+        self.last_hit = None
+        self.hunt_mode = False
+        self.target_queue = []
+        self.potential_targets = set()
+        self.directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+        
+        self.forbidden_cells = set()
+        
+        self.create_widgets()
+        self.place_computer_ships()
+        
+    def create_widgets(self):
+        player_frame = tk.Frame(self.window)
+        player_frame.grid(row=0, column=0, padx=20, pady=20)
+        
+        tk.Label(player_frame, text="Ваше поле").pack()
+        
+        self.player_canvas = tk.Canvas(player_frame, width=300, height=300, bg='lightblue')
+        self.player_canvas.pack()
+        self.draw_player_board()
+        
+        computer_frame = tk.Frame(self.window)
+        computer_frame.grid(row=0, column=1, padx=20, pady=20)
+        
+        tk.Label(computer_frame, text="Поле противника").pack()
+        
+        self.computer_canvas = tk.Canvas(computer_frame, width=300, height=300, bg='lightblue')
+        self.computer_canvas.pack()
+        self.computer_canvas.bind('<Button-1>', self.computer_board_click)
+        self.draw_computer_board()
+        
+        self.start_button = tk.Button(self.window, text="Расставить корабли", command=self.place_player_ships)
+        self.start_button.grid(row=1, column=0, columnspan=2, pady=10)
+        
+        self.status_label = tk.Label(self.window, text="Расставьте свои корабли", font=('Arial', 12))
+        self.status_label.grid(row=2, column=0, columnspan=2)
+    
+    def draw_player_board(self):
+        self.draw_board(self.player_canvas, self.player_board, show_ships=True, is_player_board=True)
+    
+    def draw_computer_board(self):
+        self.draw_board(self.computer_canvas, self.computer_board, show_ships=False, is_player_board=False)
+        
+    def draw_board(self, canvas, board, show_ships=False, is_player_board=True):
+        canvas.delete("all")
+        cell_size = 30
+        
+        for i in range(self.board_size + 1):
+            canvas.create_line(i * cell_size, 0, i * cell_size, self.board_size * cell_size)
+            canvas.create_line(0, i * cell_size, self.board_size * cell_size, i * cell_size)
+        
+        for i in range(self.board_size):
+            for j in range(self.board_size):
+                x1 = j * cell_size + 1
+                y1 = i * cell_size + 1
+                x2 = (j + 1) * cell_size - 1
+                y2 = (i + 1) * cell_size - 1
+                
+                if board[i][j] == 1 and show_ships:
+                    canvas.create_rectangle(x1, y1, x2, y2, fill='gray')
+                elif board[i][j] == 2:
+                    canvas.create_oval(x1 + 5, y1 + 5, x2 - 5, y2 - 5, fill='blue')
+                elif board[i][j] == 3:
+                    canvas.create_rectangle(x1, y1, x2, y2, fill='red')
+        
+        ships_info = self.player_ships_info if is_player_board else self.computer_ships_info
+        for ship_info in ships_info:
+            ship, hit_cells = ship_info
+            if len(hit_cells) == len(ship):
+                for row, col in ship:
+                    x1 = col * cell_size + 1
+                    y1 = row * cell_size + 1
+                    x2 = (col + 1) * cell_size - 1
+                    y2 = (row + 1) * cell_size - 1
+                    
+                    canvas.create_line(x1, y1, x2, y2, width=2, fill='darkred')
+                    canvas.create_line(x1, y2, x2, y1, width=2, fill='darkred')
+
+    def place_player_ships(self):
+        self.clear_board(self.player_board)
+        self.player_ships_info = []
+        self.place_ships_randomly(self.player_board, self.player_ships_info)
+        self.draw_player_board()
+        self.game_started = True
+        self.status_label.config(text="Игра началась! Ваш ход")
+        self.start_button.config(state='disabled')
+
+    def place_computer_ships(self):
+        self.clear_board(self.computer_board)
+        self.computer_ships_info = []
+        self.place_ships_randomly(self.computer_board, self.computer_ships_info)
+        self.computer_ships = [(i, j) for i in range(self.board_size) 
+                              for j in range(self.board_size) if self.computer_board[i][j] == 1]
+
+    def place_ships_randomly(self, board, ships_info):
+        for ship_count, ship_size in self.ships:
+            for _ in range(ship_count):
+                placed = False
+                attempts = 0
+                while not placed and attempts < 100:
+                    orientation = random.choice(['horizontal', 'vertical'])
+                    if orientation == 'horizontal':
+                        row = random.randint(0, self.board_size - 1)
+                        col = random.randint(0, self.board_size - ship_size)
+                    else:
+                        row = random.randint(0, self.board_size - ship_size)
+                        col = random.randint(0, self.board_size - 1)
+                    
+                    if self.can_place_ship(board, row, col, ship_size, orientation):
+                        ship_coords = self.place_ship(board, row, col, ship_size, orientation)
+                        ships_info.append([ship_coords, []])
+                        placed = True
+                    attempts += 1
+
+    def can_place_ship(self, board, row, col, size, orientation):
+        try:
+            if orientation == 'horizontal':
+                for j in range(max(0, col-1), min(self.board_size, col + size + 1)):
+                    for i in range(max(0, row-1), min(self.board_size, row+2)):
+                        if board[i][j] != 0:
+                            return False
+            else:
+                for i in range(max(0, row-1), min(self.board_size, row + size + 1)):
+                    for j in range(max(0, col-1), min(self.board_size, col+2)):
+                        if board[i][j] != 0:
+                            return False
+            return True
+        except IndexError:
+            return False
+
+    def place_ship(self, board, row, col, size, orientation):
+        coords = []
+        if orientation == 'horizontal':
+            for j in range(col, col + size):
+                board[row][j] = 1
+                coords.append((row, j))
+        else:
+            for i in range(row, row + size):
+                board[i][col] = 1
+                coords.append((i, col))
+        return coords
+
+    def clear_board(self, board):
+        for i in range(self.board_size):
+            for j in range(self.board_size):
+                board[i][j] = 0
+
+    def mark_forbidden_cells_around_ship(self, ship_coords):
+        for row, col in ship_coords:
+            for i in range(-1, 2):
+                for j in range(-1, 2):
+                    new_row, new_col = row + i, col + j
+                    if (0 <= new_row < self.board_size and 
+                        0 <= new_col < self.board_size):
+                        self.forbidden_cells.add((new_row, new_col))
+
+    def computer_board_click(self, event):
+        if not self.game_started or not self.player_turn:
+            return
+            
+        cell_size = 30
+        col = event.x // cell_size
+        row = event.y // cell_size
+        
+        if 0 <= row < self.board_size and 0 <= col < self.board_size:
+            if self.computer_board[row][col] in [2, 3]:
+                return
+                
+            if self.computer_board[row][col] == 1:
+                self.computer_board[row][col] = 3
+                
+                for ship_info in self.computer_ships_info:
+                    ship, hit_cells = ship_info
+                    if (row, col) in ship and (row, col) not in hit_cells:
+                        hit_cells.append((row, col))
+                        
+                        if len(hit_cells) == len(ship):
+                            self.mark_forbidden_cells_around_ship(ship)
+                        break
+                
+                self.status_label.config(text="Попадание! Следующий ход")
+                if (row, col) in self.computer_ships:
+                    self.computer_ships.remove((row, col))
+            else:
+                self.computer_board[row][col] = 2
+                self.status_label.config(text="Промах! Ход компьютера")
+                self.player_turn = False
+                self.window.after(500, self.computer_turn)
+            
+            self.draw_computer_board()
+            
+            if not self.computer_ships:
+                messagebox.showinfo("Игра окончена", "Вы выиграли!")
+                self.reset_game()
+                return
+
+    def computer_turn(self):
+        available_cells = [(i, j) for i in range(self.board_size) 
+                          for j in range(self.board_size) 
+                          if self.player_board[i][j] not in [2, 3] and 
+                          (i, j) not in self.forbidden_cells]
+        
+        if not available_cells:
+            return
+            
+        if self.target_queue:
+            row, col = self.target_queue.pop(0)
+            if (row, col) in available_cells:
+                self.execute_computer_shot(row, col, available_cells)
+                return
+        
+        if self.hunt_mode and self.last_hit:
+            self.generate_targets_around_hit()
+            if self.target_queue:
+                row, col = self.target_queue.pop(0)
+                if (row, col) in available_cells:
+                    self.execute_computer_shot(row, col, available_cells)
+                    return
+        
+        if self.potential_targets:
+            filtered_targets = [cell for cell in self.potential_targets if cell in available_cells]
+            if filtered_targets:
+                row, col = max(filtered_targets, key=lambda cell: self.calculate_cell_weight(cell, available_cells))
+                self.execute_computer_shot(row, col, available_cells)
+                return
+        
+        if available_cells:
+            center_weighted_cells = []
+            for cell in available_cells:
+                weight = self.calculate_cell_weight(cell, available_cells)
+                center_weighted_cells.extend([cell] * weight)
+            
+            if center_weighted_cells:
+                row, col = random.choice(center_weighted_cells)
+                self.execute_computer_shot(row, col, available_cells)
+                return
+        
+        if available_cells:
+            row, col = random.choice(available_cells)
+            self.execute_computer_shot(row, col, available_cells)
+
+    def calculate_cell_weight(self, cell, available_cells):
+        row, col = cell
+        weight = 1
+        
+        center_distance = abs(row - self.board_size//2) + abs(col - self.board_size//2)
+        weight += (self.board_size - center_distance) * 2
+        
+        for dr, dc in self.directions:
+            r, c = row + dr, col + dc
+            if (r, c) in available_cells:
+                weight += 1
+        
+        return weight
+
+    def generate_targets_around_hit(self):
+        if not self.last_hit:
+            return
+            
+        row, col = self.last_hit
+        
+        for dr, dc in self.directions:
+            r, c = row + dr, col + dc
+            if (0 <= r < self.board_size and 0 <= c < self.board_size and
+                self.player_board[r][c] not in [2, 3]):
+                self.target_queue.append((r, c))
+
+    def execute_computer_shot(self, row, col, available_cells):
+        if self.player_board[row][col] == 1:
+            self.player_board[row][col] = 3
+            
+            ship_destroyed = False
+            for ship_info in self.player_ships_info:
+                ship, hit_cells = ship_info
+                if (row, col) in ship and (row, col) not in hit_cells:
+                    hit_cells.append((row, col))
+                    
+                    if len(hit_cells) == len(ship):
+                        self.mark_forbidden_cells_around_ship(ship)
+                        ship_destroyed = True
+                        self.hunt_mode = False
+                        self.last_hit = None
+                        self.target_queue.clear()
+                    break
+            
+            self.status_label.config(text="Компьютер попал! Его следующий ход")
+            
+            if not ship_destroyed:
+                self.last_hit = (row, col)
+                self.hunt_mode = True
+                self.target_queue.clear()
+                self.generate_targets_around_hit()
+            
+            self.window.after(500, self.computer_turn)
+        else:
+            self.player_board[row][col] = 2
+            self.status_label.config(text="Компьютер промахнулся! Ваш ход")
+            self.player_turn = True
+        
+        self.draw_player_board()
+        
+        player_ships = [(i, j) for i in range(self.board_size) 
+                       for j in range(self.board_size) if self.player_board[i][j] == 1]
+        if not player_ships:
+            messagebox.showinfo("Игра окончена", "Компьютер выиграл!")
+            self.reset_game()
+
+    def reset_game(self):
+        self.game_started = False
+        self.player_turn = True
+        self.start_button.config(state='normal')
+        self.status_label.config(text="Расставьте свои корабли")
+        self.clear_board(self.player_board)
+        self.place_computer_ships()
+        
+        self.last_hit = None
+        self.hunt_mode = False
+        self.target_queue.clear()
+        self.potential_targets.clear()
+        self.forbidden_cells.clear()
+        
+        self.draw_player_board()
+        self.draw_computer_board()
+
+    def run(self):
+        self.window.mainloop()
+
+if __name__ == "__main__":
+    game = Battleship()
+    game.run()
