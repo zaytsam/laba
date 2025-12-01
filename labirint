@@ -23,7 +23,7 @@ class MazeTkinter:
 
         self.grid = [[1 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         self.start = (1, 1)
-        self.end = (GRID_SIZE - 2, GRID_SIZE - 2)
+        self.exits = []
         self.path = []
         self.bot_position = None
         self.bot_moving = False
@@ -34,7 +34,8 @@ class MazeTkinter:
         self.generate_maze()
         self.draw_maze()
 
-        self.canvas.bind('<Button-1>', self.on_click)
+        self.canvas.bind('<Button-1>', self.on_click_left)
+        self.canvas.bind('<Button-3>', self.on_click_right)
         self.root.bind('<Return>', self.solve)
         self.root.bind('<r>', self.reset)
         self.root.bind('<R>', self.reset)
@@ -47,6 +48,7 @@ class MazeTkinter:
         instructions = [
             "Управление:",
             "ЛКМ - поставить/убрать стену",
+            "ПКМ - добавить/убрать выход",
             "Enter - найти путь и запустить бота",
             "R - новый лабиринт",
         ]
@@ -66,6 +68,11 @@ class MazeTkinter:
         self.path_length_label = tk.Label(self.info_frame, textvariable=self.path_length_var,
                                           font=('Arial', 10), bg='#f0f0f0')
         self.path_length_label.pack(pady=5, padx=20, anchor='w')
+
+        self.exits_count_var = tk.StringVar(value="Количество выходов: 0")
+        self.exits_count_label = tk.Label(self.info_frame, textvariable=self.exits_count_var,
+                                          font=('Arial', 10), bg='#f0f0f0')
+        self.exits_count_label.pack(pady=5, padx=20, anchor='w')
 
     def generate_maze(self):
         frontier = []
@@ -90,7 +97,7 @@ class MazeTkinter:
         for _ in range(GRID_SIZE * 2):
             x = random.randint(1, GRID_SIZE - 2)
             y = random.randint(1, GRID_SIZE - 2)
-            if self.grid[x][y] == 1 and (x, y) != self.start and (x, y) != self.end:
+            if self.grid[x][y] == 1 and (x, y) != self.start:
                 passage_neighbors = 0
                 for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
                     nx, ny = x + dx, y + dy
@@ -100,22 +107,28 @@ class MazeTkinter:
                     self.grid[x][y] = 0
 
         self.grid[self.start[0]][self.start[1]] = 0
-        self.grid[self.end[0]][self.end[1]] = 0
+        self.update_exits_count()
 
     def find_path(self):
-        queue = [(self.start, [])]
+        if not self.exits:
+            return []
+
+        # DFS вместо BFS
+        stack = [(self.start, [])]
         visited = set([self.start])
         directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
 
-        while queue:
-            (x, y), path = queue.pop(0)
-            if (x, y) == self.end:
+        while stack:
+            (x, y), path = stack.pop()
+
+            if (x, y) in self.exits:
                 return path + [(x, y)]
-            for dx, dy in directions:
+
+            for dx, dy in reversed(directions):
                 nx, ny = x + dx, y + dy
                 if (0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE and self.grid[nx][ny] == 0 and (nx, ny) not in visited):
                     visited.add((nx, ny))
-                    queue.append(((nx, ny), path + [(x, y)]))
+                    stack.append(((nx, ny), path + [(x, y)]))
         return []
 
     def solve(self, event=None):
@@ -142,15 +155,15 @@ class MazeTkinter:
         self.draw_maze()
 
         if self.bot_moving:
-            self.root.after(100, self.animate_bot)  # 100ms задержка
+            self.root.after(100, self.animate_bot)
 
-    def on_click(self, event):
+    def on_click_left(self, event):
         x, y = event.x, event.y
         grid_x = y // CELL_SIZE
         grid_y = x // CELL_SIZE
 
         if 0 <= grid_x < GRID_SIZE and 0 <= grid_y < GRID_SIZE:
-            if (grid_x, grid_y) != self.start and (grid_x, grid_y) != self.end:
+            if (grid_x, grid_y) != self.start and (grid_x, grid_y) not in self.exits:
                 self.grid[grid_x][grid_y] = 1 - self.grid[grid_x][grid_y]
                 self.bot_moving = False
                 self.path = []
@@ -158,12 +171,35 @@ class MazeTkinter:
                 self.path_length_var.set(f"Длина пути: {self.path_length}")
                 self.draw_maze()
 
+    def on_click_right(self, event):
+        x, y = event.x, event.y
+        grid_x = y // CELL_SIZE
+        grid_y = x // CELL_SIZE
+
+        if 0 <= grid_x < GRID_SIZE and 0 <= grid_y < GRID_SIZE:
+            if (grid_x, grid_y) != self.start and self.grid[grid_x][grid_y] == 0:
+                if (grid_x, grid_y) in self.exits:
+                    self.exits.remove((grid_x, grid_y))
+                else:
+                    self.exits.append((grid_x, grid_y))
+
+                self.bot_moving = False
+                self.path = []
+                self.path_length = 0
+                self.path_length_var.set(f"Длина пути: {self.path_length}")
+                self.update_exits_count()
+                self.draw_maze()
+
+    def update_exits_count(self):
+        self.exits_count_var.set(f"Количество выходов: {len(self.exits)}")
+
     def reset(self, event=None):
         self.grid = [[1 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         self.path = []
         self.bot_moving = False
         self.path_length = 0
         self.path_length_var.set(f"Длина пути: {self.path_length}")
+        self.exits = []
         self.generate_maze()
         self.draw_maze()
 
@@ -186,13 +222,13 @@ class MazeTkinter:
                                      start_x1 + CELL_SIZE, start_y1 + CELL_SIZE,
                                      fill='green', outline='gray')
 
-        end_x1 = self.end[1] * CELL_SIZE
-        end_y1 = self.end[0] * CELL_SIZE
-        self.canvas.create_rectangle(end_x1, end_y1,
-                                     end_x1 + CELL_SIZE, end_y1 + CELL_SIZE,
-                                     fill='red', outline='gray')
+        for exit_pos in self.exits:
+            exit_x1 = exit_pos[1] * CELL_SIZE
+            exit_y1 = exit_pos[0] * CELL_SIZE
+            self.canvas.create_rectangle(exit_x1, exit_y1,
+                                         exit_x1 + CELL_SIZE, exit_y1 + CELL_SIZE,
+                                         fill='red', outline='gray')
 
-        # Бот
         if self.bot_position:
             bot_x1 = self.bot_position[1] * CELL_SIZE + CELL_SIZE // 4
             bot_y1 = self.bot_position[0] * CELL_SIZE + CELL_SIZE // 4
