@@ -113,7 +113,6 @@ class MazeTkinter:
         if not self.exits:
             return []
 
-        # DFS вместо BFS
         stack = [(self.start, [])]
         visited = set([self.start])
         directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
